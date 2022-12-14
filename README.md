@@ -66,7 +66,7 @@ First, download [Docker Desktop](https://www.docker.com/products/docker-desktop/
 Then, build the docker image described in the Dockerfile. 
 At this point, you can create a container and access it.<br>
 
-To build the docker image, go in `clouds-project-2022/backend-distributed-system/backend` directory and run the following script.
+To build the docker image, go in `clouds-project-2022/backend-distributed-system` directory and run the following script.
 ```
 ./clouds-build-docker
 ```
