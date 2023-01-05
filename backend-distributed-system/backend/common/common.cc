@@ -4,6 +4,8 @@
 #include <regex>
 #include <cstring>
 
+using namespace std;
+
 void sortAscendingInterval(std::vector<shard_t>& shards) {
   std::sort(
       shards.begin(), shards.end(),
@@ -111,4 +113,52 @@ int extractID(std::string key){
   assert(tokens.size() > 1); //illformed key
 
   return stoi(tokens[1]);
+}
+
+vector<server_t>::iterator findServerByName(vector<server_t>& servers, string name){
+    vector<server_t>::iterator it;
+    for(it = servers.begin(); it != servers.end(); it++){
+        if(it->name.compare(name) == 0){
+            return it;
+        }
+    }
+    return it;
+}
+
+int resizeShards(vector<server_t>& servers, int amount){
+    if(amount == 0){return-1;}
+    int final_total_shards = amount;
+    int minimum_shard_size = TOTAL_KEYS / final_total_shards;
+    int shards_one_bigger = TOTAL_KEYS % final_total_shards;
+    int lower = MIN_KEY;
+    int upper;
+    for(server &server : servers){
+        if(shards_one_bigger > 0){
+            upper = lower + minimum_shard_size;
+            shards_one_bigger--;
+        }
+        else{
+            upper = lower + minimum_shard_size - 1;
+        }
+
+        server.shards.clear();
+        shard new_shard = shard_t();
+        new_shard.lower = lower;
+        new_shard.upper = upper;
+        server.shards.push_back(new_shard);
+
+        lower = upper + 1;
+    }
+    return lower;
+}
+
+void cleanEmptyShards(vector<server_t>& servers){
+    for(server &server : servers) {
+        vector<shard_t>::iterator it;
+        for(it = server.shards.begin(); it != server.shards.end(); it++){
+            if(it->lower > it->upper){
+                server.shards.erase(it);
+            }
+        }
+    }
 }

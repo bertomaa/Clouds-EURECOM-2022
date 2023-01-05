@@ -1,4 +1,11 @@
 #include "shardmaster.h"
+#include "iostream"
+#include "../common/common.h"
+#include "../build/shardkv.pb.h"
+
+using namespace std;
+
+vector<server_t> servers;
 
 /**
  * Based on the server specified in JoinRequest, you should update the
@@ -16,10 +23,33 @@
  * ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "<your error message
  * here>")
  */
-::grpc::Status StaticShardmaster::Join(::grpc::ServerContext* context,
-                                       const ::JoinRequest* request,
-                                       Empty* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+::grpc::Status StaticShardmaster::Join(::grpc::ServerContext *context,
+                                       const ::JoinRequest *request,
+                                       Empty *response)
+{
+    /*
+    join a:1
+    join b:2
+    join c:3
+    join d:4
+    join e:5
+     */
+    //server name is request->server()
+
+    //check if server already exists
+    if(findServerByName(servers, request->server()) != servers.end()){
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "The server already exists!");
+    }
+    int new_lower = resizeShards(servers,servers.size()+1);
+    server new_server = server_t();
+    new_server.name = request->server();
+
+    shard new_shard = shard_t();
+    new_shard.lower = new_lower;
+    new_shard.upper = MAX_KEY;
+    new_server.shards.push_back(new_shard);
+    servers.push_back(new_server);
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -38,10 +68,26 @@
  * ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "<your error message
  * here>")
  */
-::grpc::Status StaticShardmaster::Leave(::grpc::ServerContext* context,
-                                        const ::LeaveRequest* request,
-                                        Empty* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+::grpc::Status StaticShardmaster::Leave(::grpc::ServerContext *context,
+                                        const ::LeaveRequest *request,
+                                        Empty *response)
+{
+    //check all the servers to remove exist
+
+    for(string i: request->servers()){
+        if(findServerByName(servers, i) == servers.end()){
+            string errorString = "The server " + i + " does not exist!";
+            return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, errorString);
+        }
+    }
+    //remove shards
+    for(string i: request->servers()){
+        vector<server_t>::iterator toRemove = findServerByName(servers, i);
+        servers.erase(toRemove);
+    }
+    resizeShards(servers,servers.size());
+
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -59,12 +105,89 @@
  * ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "<your error message
  * here>")
  */
-::grpc::Status StaticShardmaster::Move(::grpc::ServerContext* context,
-                                       const ::MoveRequest* request,
-                                       Empty* response) {
-  // Hint: Take a look at get_overlap in common.{h, cc}
-  // Using the function will save you lots of time and effort!
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+::grpc::Status StaticShardmaster::Move(::grpc::ServerContext *context,
+                                       const ::MoveRequest *request,
+                                       Empty *response)
+{
+    // Hint: Take a look at get_overlap in common.{h, cc}
+    // Using the function will save you lots of time and effort!
+
+    //request->shard().lower_
+    //request->server()
+
+    //check the server exists
+    if(findServerByName(servers, request->server()) == servers.end()){
+        string errorString = "The server " + request->server() + " does not exist!";
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, errorString);
+    }
+    
+    shard new_shard = shard_t();
+    new_shard.upper = request->shard().upper();
+    new_shard.lower = request->shard().lower();
+    for(server &server: servers){
+        if(server.name.compare(request->server()) == 0){
+            continue;
+        }
+        for(shard &current_shard: server.shards) {
+            switch (get_overlap(new_shard, current_shard)) {
+                case OverlapStatus::OVERLAP_START:
+                    current_shard.upper = new_shard.lower-1;
+                    break;
+                case OverlapStatus::OVERLAP_END:
+                    current_shard.lower = new_shard.upper+1;
+                    break;
+                case OverlapStatus::COMPLETELY_CONTAINS:
+                    current_shard.lower = 9999;
+                    current_shard.upper = 9999;
+                    break;
+                case OverlapStatus::COMPLETELY_CONTAINED:
+                    if(current_shard.lower == new_shard.lower){
+                        current_shard.lower = new_shard.upper + 1;
+                    }else if(current_shard.upper == new_shard.upper){
+                        current_shard.upper = new_shard.lower - 1;
+                    }else {
+                        int tmp = current_shard.upper;
+                        current_shard.upper = new_shard.lower - 1;
+                        shard second_part_shard = shard_t();
+                        second_part_shard.lower = new_shard.upper + 1;
+                        second_part_shard.upper = tmp;
+                        server.shards.push_back(second_part_shard);
+                    }
+                    break;
+            }
+        }
+    }
+    cleanEmptyShards(servers);
+
+    bool overlapped_once = false;
+
+    vector<server_t>::iterator it = findServerByName(servers, request->server());
+    for(shard &current_shard: it->shards){
+        switch (get_overlap(new_shard, current_shard)) {
+            case OverlapStatus::OVERLAP_START:
+                current_shard.upper = new_shard.upper;
+                overlapped_once = true;
+                break;
+            case OverlapStatus::OVERLAP_END:
+                current_shard.lower = new_shard.lower;
+                overlapped_once = true;
+                break;
+            case OverlapStatus::COMPLETELY_CONTAINS:
+                current_shard.lower = new_shard.lower;
+                current_shard.upper = new_shard.upper;
+                overlapped_once = true;
+                break;
+            case OverlapStatus::COMPLETELY_CONTAINED:
+                overlapped_once = true;
+                break;
+            case OverlapStatus::NO_OVERLAP:
+                break;
+        }
+    }
+
+    if(!overlapped_once) it->shards.push_back(new_shard);
+
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -81,8 +204,21 @@
  * ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "<your error message
  * here>")
  */
-::grpc::Status StaticShardmaster::Query(::grpc::ServerContext* context,
-                                        const StaticShardmaster::Empty* request,
-                                        ::QueryResponse* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+::grpc::Status StaticShardmaster::Query(::grpc::ServerContext *context,
+                                        const StaticShardmaster::Empty *request,
+                                        ::QueryResponse *response)
+{
+    for(server i: servers){
+        ConfigEntry * c = response->add_config();
+        c->set_server(i.name);
+        for(shard j: i.shards) {
+            Shard *s = c->add_shards();
+            s->set_lower(j.lower);
+            s->set_upper(j.upper);
+        }
+    }
+    //return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    return ::grpc::Status(::grpc::Status::OK);
 }
+
+

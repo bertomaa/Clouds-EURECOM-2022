@@ -4,6 +4,10 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include "iostream"
+
+
+using namespace std;
 
 /* ========================= */
 /* ====== Definitions ====== */
@@ -18,6 +22,7 @@ constexpr unsigned int COLD_THRESH = 10;
 // when sharding in any part of the project
 constexpr unsigned int MIN_KEY = 0;
 constexpr unsigned int MAX_KEY = 1000;
+constexpr unsigned int TOTAL_KEYS = MAX_KEY - MIN_KEY + 1;
 
 // a simple struct to represent a shard!
 // lower should be always be <= higher
@@ -33,6 +38,11 @@ typedef struct shard {
       return out;
   }
 } shard_t;
+
+typedef struct server {
+    vector<shard_t> shards;
+    string name;
+} server_t;
 
 // An enum used to represent the overlap between two shards - returned by the
 // get_overlap function
@@ -82,5 +92,11 @@ std::vector<std::string> parse_value(std::string val, std::string delim);
 //extracts the ID number out of the key
 //you may find the utility helpful when implementing shardmaster
 int extractID(std::string key);
+
+vector<server_t>::iterator findServerByName(vector<server_t>& servers, string name);
+
+int resizeShards(vector<server_t>& servers, int amount);
+
+void cleanEmptyShards(vector<server_t>& servers);
 
 #endif  // SHARDING_COMMON_H
