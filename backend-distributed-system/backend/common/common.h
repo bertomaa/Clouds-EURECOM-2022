@@ -29,6 +29,7 @@ constexpr unsigned int TOTAL_KEYS = MAX_KEY - MIN_KEY + 1;
 typedef struct shard {
   unsigned int lower;
   unsigned int upper;
+  bool to_be_deleted = false;
 
   bool operator==(const shard& rhs) const {
     return lower == rhs.lower && upper == rhs.upper;

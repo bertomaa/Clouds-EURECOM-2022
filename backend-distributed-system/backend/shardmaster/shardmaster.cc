@@ -137,15 +137,16 @@ vector<server_t> servers;
                     current_shard.lower = new_shard.upper+1;
                     break;
                 case OverlapStatus::COMPLETELY_CONTAINS:
-                    current_shard.lower = 9999;
-                    current_shard.upper = 9999;
+                    current_shard.to_be_deleted = true;
                     break;
                 case OverlapStatus::COMPLETELY_CONTAINED:
-                    if(current_shard.lower == new_shard.lower){
+                    if(current_shard.lower == new_shard.lower && current_shard.upper != new_shard.upper){
                         current_shard.lower = new_shard.upper + 1;
-                    }else if(current_shard.upper == new_shard.upper){
+                    }else if(current_shard.upper == new_shard.upper && current_shard.lower != new_shard.lower){
                         current_shard.upper = new_shard.lower - 1;
-                    }else {
+                    }else if(current_shard.upper == new_shard.upper && current_shard.lower == new_shard.lower) {
+                        current_shard.to_be_deleted = true;
+                    }else{
                         int tmp = current_shard.upper;
                         current_shard.upper = new_shard.lower - 1;
                         shard second_part_shard = shard_t();
@@ -181,6 +182,11 @@ vector<server_t> servers;
                 overlapped_once = true;
                 break;
             case OverlapStatus::NO_OVERLAP:
+                if(current_shard.upper + 1 == new_shard.lower){
+                    current_shard.upper = new_shard.upper;
+                }else if(current_shard.lower - 1 == new_shard.upper){
+                    current_shard.lower = new_shard.lower;
+                }
                 break;
         }
     }

@@ -154,11 +154,14 @@ int resizeShards(vector<server_t>& servers, int amount){
 
 void cleanEmptyShards(vector<server_t>& servers){
     for(server &server : servers) {
-        vector<shard_t>::iterator it;
-        for(it = server.shards.begin(); it != server.shards.end(); it++){
-            if(it->lower > it->upper){
-                server.shards.erase(it);
-            }
-        }
+        auto it = remove_if(server.shards.begin(), server.shards.end(), [](shard s){
+            return s.to_be_deleted;
+        });
+        server.shards.erase(it, server.shards.end());
     }
+    /*auto it = remove_if(servers.begin(), servers.end(),[](server s){
+        return s.shards.size() == 0;
+    });
+    servers.erase(it, servers.end());
+     */
 }
