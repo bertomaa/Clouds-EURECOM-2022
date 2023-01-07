@@ -165,3 +165,9 @@ void cleanEmptyShards(vector<server_t>& servers){
     servers.erase(it, servers.end());
      */
 }
+
+void logError(const std::string& method, Status& error) {
+    assert(!error.ok());
+    std::cerr << "method " << method << " failed with status code "
+              << error.error_code() << "\nthe error message was: " << error.error_message() << "\n";
+}

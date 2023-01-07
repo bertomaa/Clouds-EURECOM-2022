@@ -91,6 +91,11 @@ bool test_get_impl(const std::string& addr, std::string key,
   auto status = stub->Get(&cc, req, &res);
   // if we pass a non-nullopt optional, we expect success - otherwise we expect
   // an error
+  bool s = status.ok();
+  if(s){
+      cout << "IN TEST GET, status true " << endl;
+  }else
+      cout << "IN TEST GET, status false " << endl;
   if (value.has_value()) {
     return value.value() == res.data();
   }

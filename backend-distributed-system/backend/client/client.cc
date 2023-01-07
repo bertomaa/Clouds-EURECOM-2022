@@ -7,12 +7,6 @@
 #include "client.h"
 #include "../build/shardkv.grpc.pb.h"
 
-// helper to log errors
-void logError(const std::string& method, Status& error) {
-    assert(!error.ok());
-    std::cerr << "method " << method << " failed with status code "
-    << error.error_code() << "\nthe error message was: " << error.error_message() << "\n";
-}
 
 void Client::Query() {
     Empty query;

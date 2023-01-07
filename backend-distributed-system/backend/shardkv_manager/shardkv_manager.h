@@ -12,6 +12,11 @@
 #include "../build/shardkv.grpc.pb.h"
 #include "../build/shardmaster.grpc.pb.h"
 
+using namespace std;
+using grpc::Channel;
+using grpc::Status;
+using grpc::ClientContext;
+
 
 class PingInterval {
     std::chrono::time_point<std::chrono::system_clock> time;
@@ -66,5 +71,6 @@ class ShardkvManager : public Shardkv::Service {
     std::string sm_address;
 
     // TODO add any fields you want here!
+    string shardkv_address;
 };
 #endif  // SHARDING_SHARDKV_MANAGER_H

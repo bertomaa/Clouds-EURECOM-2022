@@ -18,7 +18,30 @@
 ::grpc::Status ShardkvManager::Get(::grpc::ServerContext* context,
                                   const ::GetRequest* request,
                                   ::GetResponse* response) {
-  return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    //TODO A key is supplied in the
+    // * request and if its value can be found, we should either set the appropriate
+    // * field in the response Otherwise, we should return an error. An error should
+    // * also be returned if the server is not responsible for the specified key
+
+    cout << "in the manager get, key: " << request->key() << endl;
+    ClientContext cc;
+    GetRequest req;
+    req.set_key(request->key());
+    GetResponse res;
+
+    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto kvStub = Shardkv::NewStub(channel);
+    auto status = kvStub->Get(&cc, req, &res);
+    if(status.ok()) {
+        cout << "IN THE GET IN MANAGER" << endl;
+        std::cout << "Get returned: " << res.data() << "\n";
+        response->set_data(res.data());
+        return ::grpc::Status(::grpc::Status::OK);
+    } else {
+        //cout << "IN THE GET error IN MANAGER" << endl;
+        logError("Get", status);
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, status.error_message());
+    }
 }
 
 /**
@@ -38,7 +61,24 @@
 ::grpc::Status ShardkvManager::Put(::grpc::ServerContext* context,
                                   const ::PutRequest* request,
                                   Empty* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    cout << "in the manager put, key: " << request->key() << " data: " << request->data() << " user: " << request->user() << endl;
+    ClientContext cc;
+    PutRequest req;
+    req.set_key(request->key());
+    req.set_data(request->data());
+    req.set_user(request->user());
+    Empty res;
+
+    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto kvStub = Shardkv::NewStub(channel);
+    auto status = kvStub->Put(&cc, req, &res);
+    if(status.ok()) {
+        cout << "manager: put: ok status received" << endl;
+    } else {
+        cout << "manager: put: ERROR received" << endl;
+        logError("Put", status);
+    }
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -57,7 +97,23 @@
 ::grpc::Status ShardkvManager::Append(::grpc::ServerContext* context,
                                      const ::AppendRequest* request,
                                      Empty* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    cout << "in the manager append, key: " << request->key() << ", data: " << request->data() << endl;
+    ClientContext cc;
+    AppendRequest req;
+    req.set_key(request->key());
+    req.set_data(request->data());
+    Empty res;
+
+    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto kvStub = Shardkv::NewStub(channel);
+    auto status = kvStub->Append(&cc, req, &res);
+    if(status.ok()) {
+        cout << "manager: append ok status received" << endl;
+    } else {
+        cout << "manager: append: ERROR received" << endl;
+        logError("Append", status);
+    }
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -75,7 +131,22 @@
 ::grpc::Status ShardkvManager::Delete(::grpc::ServerContext* context,
                                            const ::DeleteRequest* request,
                                            Empty* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    cout << "in the manager delete, key: " << request->key() << endl;
+    ClientContext cc;
+    DeleteRequest req;
+    req.set_key(request->key());
+    Empty res;
+
+    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto kvStub = Shardkv::NewStub(channel);
+    auto status = kvStub->Delete(&cc, req, &res);
+    if(status.ok()) {
+        cout << "manager: delete ok status received" << endl;
+    } else {
+        cout << "manager: delete: ERROR received" << endl;
+        logError("Delete", status);
+    }
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -92,6 +163,9 @@
  */
 ::grpc::Status ShardkvManager::Ping(::grpc::ServerContext* context, const PingRequest* request,
                                        ::PingResponse* response){
-    return ::grpc::Status(::grpc::StatusCode::OK, "Success");
+    //a shardkv was already registered
+        shardkv_address = request->server();
+        response->set_shardmaster(sm_address);
+        return ::grpc::Status(::grpc::StatusCode::OK, "Success");
 }
 

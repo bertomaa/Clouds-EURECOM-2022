@@ -5,9 +5,10 @@
 #include <vector>
 #include <iostream>
 #include "iostream"
-
+#include <grpcpp/grpcpp.h>
 
 using namespace std;
+using grpc::Status;
 
 /* ========================= */
 /* ====== Definitions ====== */
@@ -26,24 +27,34 @@ constexpr unsigned int TOTAL_KEYS = MAX_KEY - MIN_KEY + 1;
 
 // a simple struct to represent a shard!
 // lower should be always be <= higher
-typedef struct shard {
+typedef struct shard
+{
   unsigned int lower;
   unsigned int upper;
   bool to_be_deleted = false;
 
-  bool operator==(const shard& rhs) const {
+  bool operator==(const shard &rhs) const
+  {
     return lower == rhs.lower && upper == rhs.upper;
   }
-  friend std::ostream& operator<<(std::ostream& out, struct shard& s){
-      out << "{" << s.lower << ", " << s.upper << "}";
-      return out;
+  friend std::ostream &operator<<(std::ostream &out, struct shard &s)
+  {
+    out << "{" << s.lower << ", " << s.upper << "}";
+    return out;
   }
 } shard_t;
 
-typedef struct server {
-    vector<shard_t> shards;
-    string name;
+typedef struct server
+{
+  vector<shard_t> shards;
+  string name;
 } server_t;
+
+typedef struct post
+{
+  string user_id;
+  string content;
+} post_t;
 
 // An enum used to represent the overlap between two shards - returned by the
 // get_overlap function
@@ -62,19 +73,19 @@ enum class OverlapStatus {
 // Note: You do not have to use these unless you want to!
 
 // sorts a vector of shards by their lower interval
-void sortAscendingInterval(std::vector<shard_t>& shards);
+void sortAscendingInterval(std::vector<shard_t> &shards);
 // sorts a vector of shards into ascending/descending order of shard length
-void sortAscendingSize(std::vector<shard_t>& shards);
-void sortDescendingSize(std::vector<shard_t>& shards);
+void sortAscendingSize(std::vector<shard_t> &shards);
+void sortDescendingSize(std::vector<shard_t> &shards);
 
 // gets the size of a shard
-size_t size(const shard_t& s);
+size_t size(const shard_t &s);
 // gets the total size of a vector of shards
-size_t shardRangeSize(const std::vector<shard_t>& vec);
+size_t shardRangeSize(const std::vector<shard_t> &vec);
 
 // splits a shard evenly into two. if it can't be split evenly the first shard
 // in the pair will get the extra key. will error if called on a size 1 shard.
-std::pair<shard_t, shard_t> split_shard(const shard_t& s);
+std::pair<shard_t, shard_t> split_shard(const shard_t &s);
 
 // returns the overlap status of a relative to b.
 // Example: if OVERLAP_END is returned, it means that the end of a overlaps with
@@ -82,22 +93,24 @@ std::pair<shard_t, shard_t> split_shard(const shard_t& s);
 // case would look like -- so check out the implementation in common.cc
 // This function will be very useful in implementing your shardmaster's Move
 // RPC!
-OverlapStatus get_overlap(const shard_t& a, const shard_t& b);
+OverlapStatus get_overlap(const shard_t &a, const shard_t &b);
 
 // utility function for splitting strings on whitespace
-std::vector<std::string> split(const std::string& s);
+std::vector<std::string> split(const std::string &s);
 
-// like split, but for an arbitrary delimiter 
+// like split, but for an arbitrary delimiter
 std::vector<std::string> parse_value(std::string val, std::string delim);
 
-//extracts the ID number out of the key
-//you may find the utility helpful when implementing shardmaster
+// extracts the ID number out of the key
+// you may find the utility helpful when implementing shardmaster
 int extractID(std::string key);
 
-vector<server_t>::iterator findServerByName(vector<server_t>& servers, string name);
+vector<server_t>::iterator findServerByName(vector<server_t> &servers, string name);
 
-int resizeShards(vector<server_t>& servers, int amount);
+int resizeShards(vector<server_t> &servers, int amount);
 
-void cleanEmptyShards(vector<server_t>& servers);
+void cleanEmptyShards(vector<server_t> &servers);
 
-#endif  // SHARDING_COMMON_H
+void logError(const std::string& method, Status& error);
+
+#endif // SHARDING_COMMON_H

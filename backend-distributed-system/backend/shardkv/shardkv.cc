@@ -1,7 +1,29 @@
 #include <grpcpp/grpcpp.h>
 
 #include "shardkv.h"
+#include "../build/shardkv.grpc.pb.h"
+#include <grpcpp/grpcpp.h>
 
+using grpc::Channel;
+using grpc::Status;
+using grpc::ClientContext;
+
+vector<shard_t> shards_assigned;
+
+
+bool isKeyAssigned(string key){
+    string key_str = key.substr(5);
+    if (key.find("posts") != std::string::npos) {
+        key_str = key_str.substr(0, key_str.length()-6);
+    }
+    unsigned int key_int = stoul(key_str);
+    for(shard s: shards_assigned){
+        if(s.lower <= key_int && s.upper >= key_int){
+            return true;
+        }
+    }
+    return false;
+}
 /**
  * This method is analogous to a hashmap lookup. A key is supplied in the
  * request and if its value can be found, we should either set the appropriate
@@ -18,7 +40,107 @@
 ::grpc::Status ShardkvServer::Get(::grpc::ServerContext* context,
                                   const ::GetRequest* request,
                                   ::GetResponse* response) {
-  return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    string key = request->key();
+    bool NO_REQ = false;
+    if (key.find("_no_req") != std::string::npos) {
+        key = key.substr(0, key.length()-7);
+        NO_REQ = true;
+    }
+
+
+    cout << "in shardkv, get, key: " << request->key() << endl;
+    bool is_all_users = key.compare("all_users") == 0;
+    if(!NO_REQ && (!is_all_users && !::isKeyAssigned(key))) {
+        cerr << "key not assigned" << endl;
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "key is not assigned to this shardkv");
+    }
+    try {
+        if (key.find("all_users") != std::string::npos) {
+            //list all users
+            cout << "listing all users" << endl;
+            string res = "";
+            for (map<string, string>::iterator it = users.begin(); it != users.end(); ++it)
+            {
+                //cout << "listing user" << it->first << endl;
+                res += it->first;
+                res += ",";
+            }
+            response->set_data(res);
+            return ::grpc::Status(::grpc::Status::OK);
+        } else if (key.find("post", 0) == 0) {
+            //get on a post
+            if(posts.count(key) == 0) {
+                return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "post does not exist");
+            }
+            response->set_data(posts[key].content);
+        } else {
+            //get on a user
+            if (key.find("posts") != std::string::npos) {
+                //list all posts of user
+                string user_key = key.substr(0, key.size()-6);
+                //if(users.count(user_key) == 0){
+                //    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "user does not exist");
+                //}
+                string res = "";
+                for (map<string, post_t>::iterator it = posts.begin(); it != posts.end(); ++it)
+                {
+                    if(it->second.user_id.compare(user_key) == 0){
+                        res += it->first;
+                        res += ",";
+                    }
+                }
+                /*
+                 *
+                 * ASK TO OTHER MANAGERS ABOUT USER POSTS
+                 *
+                 * */
+                if(NO_REQ == false) {
+                    for (server_t serv: other_managers) {
+                        cout << "asking to other managers" << endl;
+                        ClientContext cc;
+                        GetRequest req;
+                        string new_key = key + "_no_req";
+                        req.set_key(new_key);
+                        GetResponse get_resp;
+
+                        auto channel = grpc::CreateChannel(serv.name, grpc::InsecureChannelCredentials());
+                        auto kvStub = Shardkv::NewStub(channel);
+                        auto status = kvStub->Get(&cc, req, &get_resp);
+                        if (status.ok()) {
+                            cout << serv.name << " answered with " << get_resp.data() << endl;
+                            res += get_resp.data();
+                        } else {
+                            cout << serv.name << " DID NOT ANSWER " << status.error_message() << endl;
+                        }
+                    }
+                }
+
+
+
+                /*
+                 *
+                 * ---END---
+                 *
+                 * */
+                if(res.compare("") == 0){
+                    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "user does not have posts");
+                }else{
+                    response->set_data(res);
+                    return ::grpc::Status(::grpc::Status::OK);
+                }
+            }
+            else if(users.count(key) == 0) {
+                return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "user does not exist");
+            }else
+                response->set_data(users[key]);
+        }
+    }catch (const exception& e){
+        //cout << "shardkv, in get, try exception: " << e.what() << endl;
+        //return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, e.what());
+        response->set_data(e.what());
+        return ::grpc::Status(::grpc::Status::OK);
+    }
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -38,7 +160,37 @@
 ::grpc::Status ShardkvServer::Put(::grpc::ServerContext* context,
                                   const ::PutRequest* request,
                                   Empty* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    cout << "in the shardkv put, key: " << request->key() << " data: " << request->data() << " user: " << request->user() << endl;
+
+    string key = request->key();
+    if(!::isKeyAssigned(key))
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "key is not assigned to this shardkv");
+
+    if (key.rfind("post", 0) == 0) {
+        //put on a post
+        post_t p = post_t();
+        p.content = request->data();
+        p.user_id = request->user();
+        posts[key] = p;
+    } else {
+        //put on a user
+        users[request->key()] = request->data();
+    }
+    cout << "printing users" << endl;
+    for_each(users.begin(),
+             users.end(),
+             [](const std::pair<string, string> &p) {
+                 std::cout << "{" << p.first << ": " << p.second << "}\n";
+             });
+
+    /*cout << "printing posts" << endl;
+    for_each(users.begin(),
+             users.end(),
+             [](const std::pair<string, post_t> &p) {
+                 std::cout << "{" << p.first << ": {" << p.second.user_id << ", " << p.second.content << "}\n";
+             });*/
+
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -57,7 +209,8 @@
 ::grpc::Status ShardkvServer::Append(::grpc::ServerContext* context,
                                      const ::AppendRequest* request,
                                      Empty* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    cout << "in the shardkv append, key: " << request->key() << ", data: " << request->data() << endl;
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -75,7 +228,30 @@
 ::grpc::Status ShardkvServer::Delete(::grpc::ServerContext* context,
                                            const ::DeleteRequest* request,
                                            Empty* response) {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "Not implemented yet");
+    cout << "in the shardkv delete, key: " << request->key() << endl;
+
+    string key = request->key();
+
+    if (key.rfind("post", 0) == 0) {
+        //delete on a post
+        if(posts.count(key) == 0)
+            return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "post does not exist");
+        posts.erase(key);
+    } else {
+        //delete on a user
+        if(users.count(key) == 0)
+            return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "user does not exist");
+        users.erase(key);
+    }
+    cout << "printing users" << endl;
+    for_each(users.begin(),
+             users.end(),
+             [](const std::pair<string, string> &p) {
+                 std::cout << "{" << p.first << ": " << p.second << "}\n";
+             });
+
+    return ::grpc::Status(::grpc::Status::OK);
+    return ::grpc::Status(::grpc::Status::OK);
 }
 
 /**
@@ -97,7 +273,37 @@
  * method!
  */
 void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
+    ClientContext cc;
+    Empty req;
+    QueryResponse res;
+    //TODO mettere mutex su vector other_managers e su chiunque ci accceda
 
+    //cout <<  "my address: " << address << endl;
+
+    other_managers.clear();
+    auto status = stub->Query(&cc, req, &res);
+    if(status.ok()) {
+        for(const ConfigEntry config : res.config()) {
+            if(config.server().compare(shardmanager_address) != 0){
+                server_t s = server_t();
+                s.name = config.server();
+                other_managers.push_back(s);
+            }else {
+                for (const Shard s: config.shards()) {
+                    shard_t new_shard = shard_t();
+                    new_shard.lower = s.lower();
+                    new_shard.upper = s.upper();
+                    shards_assigned.push_back(new_shard);
+                }
+            }
+        }
+    } else {
+        logError("Query", status);
+    }
+    //for (shard_t i: shards_assigned)
+    //    std::cout << i.lower << " - " << i.upper << endl;
+    //for (server_t s: other_managers)
+    //    std::cout << s.name << endl;
 }
 
 
@@ -116,7 +322,21 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
  * */
 void ShardkvServer::PingShardmanager(Shardkv::Stub* stub) {
 
+    PingRequest pingReq;
+    pingReq.set_server(address);
+
+    PingResponse pingResponse;
+    ClientContext cc;
+
+    Status status = stub->Ping(&cc, pingReq, &pingResponse);
+    if(status.ok()) {
+        shardmaster_address = pingResponse.shardmaster();
+    } else {
+        logError("Ping request", status);
+    }
 }
+
+
 
 
 /**
