@@ -147,7 +147,6 @@
     } else {
         cout << "manager: delete: ERROR received" << endl;
         logError("Delete", status);
-        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, status.error_message());
     }
     return ::grpc::Status(::grpc::Status::OK);
 }
