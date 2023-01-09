@@ -8,8 +8,6 @@ using grpc::Channel;
 using grpc::Status;
 using grpc::ClientContext;
 
-
-vector<server_t> other_managers;
 mutex mutex_shards_assigned;
 
 bool isKeyAssigned(string key, vector<shard_t>& shards_assigned){
@@ -28,7 +26,7 @@ bool isKeyAssigned(string key, vector<shard_t>& shards_assigned){
     return false;
 }
 
-string findServerFromKey(string key){
+string findServerFromKey(string key, vector<server_t>& other_managers){
     string key_str = key.substr(5);
     unsigned int key_int = stoul(key_str);
     for(server_t serv: other_managers){
@@ -309,7 +307,7 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
                     serv.shards.push_back(new_shard);
                 }
                 other_managers.push_back(serv);
-            } else if(config.server().compare(shardmanager_address) == 0){
+            } else if (config.server().compare(shardmanager_address) == 0) {
                 mutex_shards_assigned.lock();
                 shards_assigned.clear();
                 //cout << "i am " << address << "clearing" << endl;
@@ -323,7 +321,8 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
             }
         }
 
-        vector <string> keys_to_remove;
+        vector <string> users_to_remove;
+        //vector <string> posts_to_remove;
 
         //transfer keys that are not assigned to this server anymore
         for (map<string, string>::iterator it = users.begin(); it != users.end(); ++it) {
@@ -332,37 +331,28 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
                 bool first = true;
                 bool loop = true;
                 do {
-                    cout << "d" << endl;
                     ClientContext cc;
                     PutRequest req;
                     req.set_key(it->first);
                     req.set_data(it->second);
                     Empty get_resp;
-                    string server_to_send = findServerFromKey(it->first);
+                    string server_to_send = findServerFromKey(it->first, other_managers);
                     auto channel = grpc::CreateChannel(server_to_send, grpc::InsecureChannelCredentials());
 
                     auto kvStub = Shardkv::NewStub(channel);
                     auto status = kvStub->Put(&cc, req, &get_resp);
-                    if (!first) {
-                        std::chrono::milliseconds timespan(100);
-                        std::this_thread::sleep_for(timespan);
-                        first = false;
-                    }
-                    cout << "a" << endl;
                     if (status.ok()) {
                         loop = false;
-                        cout << "status: ok" << endl;
+                        cout << "status: ok" << it->first << " successfully moved" << endl;
                     } else {
                         loop = true;
-                        cout << "status: not ok" << endl;
+                        cout << "status: not ok" << it->first << " NOT successfully moved" << endl;
                     }
-                    cout << "b" << endl;
                 } while (loop);
-                cout << "c" << endl;
-                keys_to_remove.push_back(it->first);
+                users_to_remove.push_back(it->first);
             }
         }
-        for (string str: keys_to_remove) {
+        for (string str: users_to_remove) {
             auto it = users.find(str);
             users.erase(it);
             cout << "removed " << str << endl;
