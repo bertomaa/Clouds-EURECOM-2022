@@ -295,6 +295,8 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
     auto status = stub->Query(&cc, req, &res);
     if(status.ok()) {
         other_managers.clear();
+        mutex_shards_assigned.lock();
+        shards_assigned.clear();
         for (const ConfigEntry config: res.config()) {
             //if it is not the server config -> save in other_managers
             if (config.server().compare(shardmanager_address) != 0) {
@@ -308,8 +310,6 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
                 }
                 other_managers.push_back(serv);
             } else if (config.server().compare(shardmanager_address) == 0) {
-                mutex_shards_assigned.lock();
-                shards_assigned.clear();
                 //cout << "i am " << address << "clearing" << endl;
                 for (const Shard s: config.shards()) {
                     shard_t new_shard = shard_t();
@@ -317,9 +317,9 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
                     new_shard.upper = s.upper();
                     shards_assigned.push_back(new_shard);
                 }
-                mutex_shards_assigned.unlock();
             }
         }
+        mutex_shards_assigned.unlock();
 
         vector <string> users_to_remove;
         vector <string> posts_to_remove;
