@@ -98,6 +98,10 @@ class ShardkvServer : public Shardkv::Service {
   map<string, post_t> posts;
   vector<server_t> other_managers;
   vector<shard_t> shards_assigned;
+  mutex mutex_shards_assigned;
+  mutex mutex_other_managers;
+  mutex mutex_users;
+  mutex mutex_posts;
 };
 
 #endif  // SHARDING_SHARDKV_H

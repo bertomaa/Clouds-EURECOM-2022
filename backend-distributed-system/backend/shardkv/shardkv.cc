@@ -8,9 +8,7 @@ using grpc::Channel;
 using grpc::Status;
 using grpc::ClientContext;
 
-mutex mutex_shards_assigned;
-
-bool isKeyAssigned(string key, vector<shard_t>& shards_assigned){
+bool isKeyAssigned(string key, vector<shard_t>& shards_assigned, mutex& mutex_shards_assigned){
     string key_str = key.substr(5);
     if (key.find("posts") != std::string::npos) {
         key_str = key_str.substr(0, key_str.length()-6);
@@ -26,16 +24,19 @@ bool isKeyAssigned(string key, vector<shard_t>& shards_assigned){
     return false;
 }
 
-string findServerFromKey(string key, vector<server_t>& other_managers){
+string findServerFromKey(string key, vector<server_t>& other_managers, mutex& mutex_other_managers){
     string key_str = key.substr(5);
     unsigned int key_int = stoul(key_str);
+    mutex_other_managers.lock();
     for(server_t serv: other_managers){
         for(shard s: serv.shards){
             if(s.lower <= key_int && s.upper >= key_int){
+                mutex_other_managers.unlock();
                 return serv.name;
             }
         }
     }
+    mutex_other_managers.unlock();
     cout << "NO SERVER FOUND" << endl;
 }
 /**
@@ -64,7 +65,7 @@ string findServerFromKey(string key, vector<server_t>& other_managers){
 
     cout << "in shardkv, get, key: " << request->key() << endl;
     bool is_all_users = key.compare("all_users") == 0;
-    if(!NO_REQ && (!is_all_users && !::isKeyAssigned(key, shards_assigned))) {
+    if(!NO_REQ && (!is_all_users && !::isKeyAssigned(key, shards_assigned, mutex_shards_assigned))) {
         cerr << "shrdkv not responsible of this key" << endl;
         return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "key is not assigned to this shardkv");
     }
@@ -73,20 +74,25 @@ string findServerFromKey(string key, vector<server_t>& other_managers){
             //list all users
             cout << "listing all users" << endl;
             string res = "";
+            mutex_users.lock();
             for (map<string, string>::iterator it = users.begin(); it != users.end(); ++it)
             {
                 //cout << "listing user" << it->first << endl;
                 res += it->first;
                 res += ",";
             }
+            mutex_users.unlock();
             response->set_data(res);
             return ::grpc::Status(::grpc::Status::OK);
         } else if (key.find("post", 0) == 0) {
             //get on a post
+            mutex_posts.lock();
             if(posts.count(key) == 0) {
+                mutex_posts.unlock();
                 return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "post does not exist");
             }
             response->set_data(posts[key].content);
+            mutex_posts.unlock();
         } else {
             //get on a user
             if (key.find("posts") != std::string::npos) {
@@ -96,6 +102,7 @@ string findServerFromKey(string key, vector<server_t>& other_managers){
                 //    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "user does not exist");
                 //}
                 string res = "";
+                mutex_posts.lock();
                 for (map<string, post_t>::iterator it = posts.begin(); it != posts.end(); ++it)
                 {
                     if(it->second.user_id.compare(user_key) == 0){
@@ -103,12 +110,14 @@ string findServerFromKey(string key, vector<server_t>& other_managers){
                         res += ",";
                     }
                 }
+                mutex_posts.unlock();
                 /*
                  *
                  * ASK TO OTHER MANAGERS ABOUT USER POSTS
                  *
                  * */
                 if(NO_REQ == false) {
+                    mutex_other_managers.lock();
                     for (server_t serv: other_managers) {
                         cout << "asking to other managers" << endl;
                         ClientContext cc;
@@ -127,6 +136,7 @@ string findServerFromKey(string key, vector<server_t>& other_managers){
                             cout << serv.name << " DID NOT ANSWER " << status.error_message() << endl;
                         }
                     }
+                    mutex_other_managers.unlock();
                 }
 
 
@@ -177,7 +187,7 @@ string findServerFromKey(string key, vector<server_t>& other_managers){
     cout << "in the shardkv" << address << "put, key: " << request->key() << " data: " << request->data() << " user: " << request->user() << endl;
 
     string key = request->key();
-    if(!::isKeyAssigned(key, shards_assigned))
+    if(!::isKeyAssigned(key, shards_assigned, mutex_shards_assigned))
         return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "key is not assigned to this shardkv");
 
     if (key.rfind("post", 0) == 0) {
@@ -185,10 +195,14 @@ string findServerFromKey(string key, vector<server_t>& other_managers){
         post_t p = post_t();
         p.content = request->data();
         p.user_id = request->user();
+        mutex_posts.lock();
         posts[key] = p;
+        mutex_posts.unlock();
     } else {
         //put on a user
+        mutex_users.lock();
         users[request->key()] = request->data();
+        mutex_users.unlock();
     }
     cout << "printing users" << endl;
     for_each(users.begin(),
@@ -248,14 +262,21 @@ string findServerFromKey(string key, vector<server_t>& other_managers){
 
     if (key.rfind("post", 0) == 0) {
         //delete on a post
+        mutex_posts.lock();
         if(posts.count(key) == 0)
+            mutex_posts.unlock();
             return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "post does not exist");
         posts.erase(key);
+        mutex_posts.unlock();
     } else {
         //delete on a user
+
+        mutex_users.lock();
         if(users.count(key) == 0)
+            mutex_users.unlock();
             return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "user does not exist");
         users.erase(key);
+        mutex_users.unlock();
     }
     cout << "printing users" << endl;
     for_each(users.begin(),
@@ -294,6 +315,7 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
 
     auto status = stub->Query(&cc, req, &res);
     if(status.ok()) {
+        mutex_other_managers.lock();
         other_managers.clear();
         mutex_shards_assigned.lock();
         shards_assigned.clear();
@@ -320,13 +342,14 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
             }
         }
         mutex_shards_assigned.unlock();
-
+        mutex_other_managers.unlock();
         vector <string> users_to_remove;
         vector <string> posts_to_remove;
 
         //transfer keys that are not assigned to this server anymore
+        mutex_users.lock();
         for (map<string, string>::iterator it = users.begin(); it != users.end(); ++it) {
-            bool isAss = ::isKeyAssigned(it->first, shards_assigned);
+            bool isAss = ::isKeyAssigned(it->first, shards_assigned, mutex_shards_assigned);
             if (!isAss) {
                 bool first = true;
                 bool loop = true;
@@ -336,7 +359,7 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
                     req.set_key(it->first);
                     req.set_data(it->second);
                     Empty get_resp;
-                    string server_to_send = findServerFromKey(it->first, other_managers);
+                    string server_to_send = findServerFromKey(it->first, other_managers, mutex_other_managers);
                     auto channel = grpc::CreateChannel(server_to_send, grpc::InsecureChannelCredentials());
 
                     auto kvStub = Shardkv::NewStub(channel);
@@ -357,8 +380,10 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
             users.erase(it);
             cout << "removed " << str << endl;
         }
+        mutex_users.unlock();
+        mutex_posts.lock();
         for (map<string, post_t>::iterator it = posts.begin(); it != posts.end(); ++it) {
-            bool isAss = ::isKeyAssigned(it->first, shards_assigned);
+            bool isAss = ::isKeyAssigned(it->first, shards_assigned, mutex_shards_assigned);
             if (!isAss) {
                 bool first = true;
                 bool loop = true;
@@ -369,7 +394,7 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
                     req.set_data(it->second.content);
                     req.set_user(it->second.user_id);
                     Empty get_resp;
-                    string server_to_send = findServerFromKey(it->first, other_managers);
+                    string server_to_send = findServerFromKey(it->first, other_managers, mutex_other_managers);
                     auto channel = grpc::CreateChannel(server_to_send, grpc::InsecureChannelCredentials());
 
                     auto kvStub = Shardkv::NewStub(channel);
@@ -390,6 +415,7 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
             posts.erase(it);
             cout << "removed " << str << endl;
         }
+        mutex_posts.unlock();
     } else {
         logError("Query", status);
     }
