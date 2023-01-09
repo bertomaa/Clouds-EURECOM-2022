@@ -8,6 +8,7 @@ using grpc::Channel;
 using grpc::Status;
 using grpc::ClientContext;
 
+
 bool isKeyAssigned(string key, vector<shard_t>& shards_assigned, mutex& mutex_shards_assigned){
     string key_str = key.substr(5);
     if (key.find("posts") != std::string::npos) {
