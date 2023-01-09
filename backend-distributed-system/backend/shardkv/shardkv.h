@@ -97,7 +97,7 @@ class ShardkvServer : public Shardkv::Service {
   map<string, string> users;//key, value
   map<string, post_t> posts;
   vector<server_t> other_managers;
-
+  vector<shard_t> shards_assigned;
 };
 
 #endif  // SHARDING_SHARDKV_H

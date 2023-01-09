@@ -8,21 +8,37 @@ using grpc::Channel;
 using grpc::Status;
 using grpc::ClientContext;
 
-vector<shard_t> shards_assigned;
 
+vector<server_t> other_managers;
+mutex mutex_shards_assigned;
 
-bool isKeyAssigned(string key){
+bool isKeyAssigned(string key, vector<shard_t>& shards_assigned){
     string key_str = key.substr(5);
     if (key.find("posts") != std::string::npos) {
         key_str = key_str.substr(0, key_str.length()-6);
     }
     unsigned int key_int = stoul(key_str);
-    for(shard s: shards_assigned){
-        if(s.lower <= key_int && s.upper >= key_int){
+    mutex_shards_assigned.lock();
+    for(shard s: shards_assigned){ if(s.lower <= key_int && s.upper >= key_int){
+            mutex_shards_assigned.unlock();
             return true;
         }
     }
+    mutex_shards_assigned.unlock();
     return false;
+}
+
+string findServerFromKey(string key){
+    string key_str = key.substr(5);
+    unsigned int key_int = stoul(key_str);
+    for(server_t serv: other_managers){
+        for(shard s: serv.shards){
+            if(s.lower <= key_int && s.upper >= key_int){
+                return serv.name;
+            }
+        }
+    }
+    cout << "NO SERVER FOUND" << endl;
 }
 /**
  * This method is analogous to a hashmap lookup. A key is supplied in the
@@ -50,8 +66,8 @@ bool isKeyAssigned(string key){
 
     cout << "in shardkv, get, key: " << request->key() << endl;
     bool is_all_users = key.compare("all_users") == 0;
-    if(!NO_REQ && (!is_all_users && !::isKeyAssigned(key))) {
-        cerr << "key not assigned" << endl;
+    if(!NO_REQ && (!is_all_users && !::isKeyAssigned(key, shards_assigned))) {
+        cerr << "shrdkv not responsible of this key" << endl;
         return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "key is not assigned to this shardkv");
     }
     try {
@@ -160,10 +176,10 @@ bool isKeyAssigned(string key){
 ::grpc::Status ShardkvServer::Put(::grpc::ServerContext* context,
                                   const ::PutRequest* request,
                                   Empty* response) {
-    cout << "in the shardkv put, key: " << request->key() << " data: " << request->data() << " user: " << request->user() << endl;
+    cout << "in the shardkv" << address << "put, key: " << request->key() << " data: " << request->data() << " user: " << request->user() << endl;
 
     string key = request->key();
-    if(!::isKeyAssigned(key))
+    if(!::isKeyAssigned(key, shards_assigned))
         return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "key is not assigned to this shardkv");
 
     if (key.rfind("post", 0) == 0) {
@@ -226,8 +242,8 @@ bool isKeyAssigned(string key){
  * here>")
  */
 ::grpc::Status ShardkvServer::Delete(::grpc::ServerContext* context,
-                                           const ::DeleteRequest* request,
-                                           Empty* response) {
+                                     const ::DeleteRequest* request,
+                                     Empty* response) {
     cout << "in the shardkv delete, key: " << request->key() << endl;
 
     string key = request->key();
@@ -278,32 +294,82 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
     QueryResponse res;
     //TODO mettere mutex su vector other_managers e su chiunque ci accceda
 
-    //cout <<  "my address: " << address << endl;
-
-    other_managers.clear();
     auto status = stub->Query(&cc, req, &res);
     if(status.ok()) {
-        for(const ConfigEntry config : res.config()) {
-            if(config.server().compare(shardmanager_address) != 0){
-                server_t s = server_t();
-                s.name = config.server();
-                other_managers.push_back(s);
-            }else {
+        other_managers.clear();
+        for (const ConfigEntry config: res.config()) {
+            //if it is not the server config -> save in other_managers
+            if (config.server().compare(shardmanager_address) != 0) {
+                server_t serv = server_t();
+                serv.name = config.server();
+                for (const Shard s: config.shards()) {
+                    shard_t new_shard = shard_t();
+                    new_shard.lower = s.lower();
+                    new_shard.upper = s.upper();
+                    serv.shards.push_back(new_shard);
+                }
+                other_managers.push_back(serv);
+            } else if(config.server().compare(shardmanager_address) == 0){
+                mutex_shards_assigned.lock();
+                shards_assigned.clear();
+                //cout << "i am " << address << "clearing" << endl;
                 for (const Shard s: config.shards()) {
                     shard_t new_shard = shard_t();
                     new_shard.lower = s.lower();
                     new_shard.upper = s.upper();
                     shards_assigned.push_back(new_shard);
                 }
+                mutex_shards_assigned.unlock();
             }
+        }
+
+        vector <string> keys_to_remove;
+
+        //transfer keys that are not assigned to this server anymore
+        for (map<string, string>::iterator it = users.begin(); it != users.end(); ++it) {
+            bool isAss = ::isKeyAssigned(it->first, shards_assigned);
+            if (!isAss) {
+                bool first = true;
+                bool loop = true;
+                do {
+                    cout << "d" << endl;
+                    ClientContext cc;
+                    PutRequest req;
+                    req.set_key(it->first);
+                    req.set_data(it->second);
+                    Empty get_resp;
+                    string server_to_send = findServerFromKey(it->first);
+                    auto channel = grpc::CreateChannel(server_to_send, grpc::InsecureChannelCredentials());
+
+                    auto kvStub = Shardkv::NewStub(channel);
+                    auto status = kvStub->Put(&cc, req, &get_resp);
+                    if (!first) {
+                        std::chrono::milliseconds timespan(100);
+                        std::this_thread::sleep_for(timespan);
+                        first = false;
+                    }
+                    cout << "a" << endl;
+                    if (status.ok()) {
+                        loop = false;
+                        cout << "status: ok" << endl;
+                    } else {
+                        loop = true;
+                        cout << "status: not ok" << endl;
+                    }
+                    cout << "b" << endl;
+                } while (loop);
+                cout << "c" << endl;
+                keys_to_remove.push_back(it->first);
+            }
+        }
+        for (string str: keys_to_remove) {
+            auto it = users.find(str);
+            users.erase(it);
+            cout << "removed " << str << endl;
         }
     } else {
         logError("Query", status);
     }
-    //for (shard_t i: shards_assigned)
-    //    std::cout << i.lower << " - " << i.upper << endl;
-    //for (server_t s: other_managers)
-    //    std::cout << s.name << endl;
 }
 
 
