@@ -322,7 +322,7 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
         }
 
         vector <string> users_to_remove;
-        //vector <string> posts_to_remove;
+        vector <string> posts_to_remove;
 
         //transfer keys that are not assigned to this server anymore
         for (map<string, string>::iterator it = users.begin(); it != users.end(); ++it) {
@@ -355,6 +355,39 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
         for (string str: users_to_remove) {
             auto it = users.find(str);
             users.erase(it);
+            cout << "removed " << str << endl;
+        }
+        for (map<string, post_t>::iterator it = posts.begin(); it != posts.end(); ++it) {
+            bool isAss = ::isKeyAssigned(it->first, shards_assigned);
+            if (!isAss) {
+                bool first = true;
+                bool loop = true;
+                do {
+                    ClientContext cc;
+                    PutRequest req;
+                    req.set_key(it->first);
+                    req.set_data(it->second.content);
+                    req.set_user(it->second.user_id);
+                    Empty get_resp;
+                    string server_to_send = findServerFromKey(it->first, other_managers);
+                    auto channel = grpc::CreateChannel(server_to_send, grpc::InsecureChannelCredentials());
+
+                    auto kvStub = Shardkv::NewStub(channel);
+                    auto status = kvStub->Put(&cc, req, &get_resp);
+                    if (status.ok()) {
+                        loop = false;
+                        cout << "status: ok" << it->first << " successfully moved" << endl;
+                    } else {
+                        loop = true;
+                        cout << "status: not ok" << it->first << " NOT successfully moved" << endl;
+                    }
+                } while (loop);
+                posts_to_remove.push_back(it->first);
+            }
+        }
+        for (string str: posts_to_remove) {
+            auto it = posts.find(str);
+            posts.erase(it);
             cout << "removed " << str << endl;
         }
     } else {
