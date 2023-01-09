@@ -69,6 +69,7 @@ string findServerFromKey(string key, vector<server_t>& other_managers, mutex& mu
         cerr << "shrdkv not responsible of this key" << endl;
         return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "key is not assigned to this shardkv");
     }
+
     try {
         if (key.find("all_users") != std::string::npos) {
             //list all users
@@ -86,12 +87,14 @@ string findServerFromKey(string key, vector<server_t>& other_managers, mutex& mu
             return ::grpc::Status(::grpc::Status::OK);
         } else if (key.find("post", 0) == 0) {
             //get on a post
+
             mutex_posts.lock();
             if(posts.count(key) == 0) {
                 mutex_posts.unlock();
                 return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "post does not exist");
             }
             response->set_data(posts[key].content);
+            cout << "d" <<endl;
             mutex_posts.unlock();
         } else {
             //get on a user
@@ -256,27 +259,26 @@ string findServerFromKey(string key, vector<server_t>& other_managers, mutex& mu
 ::grpc::Status ShardkvServer::Delete(::grpc::ServerContext* context,
                                      const ::DeleteRequest* request,
                                      Empty* response) {
-    cout << "in the shardkv delete, key: " << request->key() << endl;
+    cout << "in the shardkv " << address << "delete, key: " << request->key() << endl;
 
     string key = request->key();
 
     if (key.rfind("post", 0) == 0) {
         //delete on a post
-        mutex_posts.lock();
+        //mutex_posts.lock();
         if(posts.count(key) == 0)
-            mutex_posts.unlock();
+            //mutex_posts.unlock();
             return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "post does not exist");
         posts.erase(key);
-        mutex_posts.unlock();
+       // mutex_posts.unlock();
     } else {
         //delete on a user
-
-        mutex_users.lock();
+        //mutex_users.lock();
         if(users.count(key) == 0)
-            mutex_users.unlock();
+            //mutex_users.unlock();
             return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "user does not exist");
         users.erase(key);
-        mutex_users.unlock();
+        //mutex_users.unlock();
     }
     cout << "printing users" << endl;
     for_each(users.begin(),
@@ -285,7 +287,6 @@ string findServerFromKey(string key, vector<server_t>& other_managers, mutex& mu
                  std::cout << "{" << p.first << ": " << p.second << "}\n";
              });
 
-    return ::grpc::Status(::grpc::Status::OK);
     return ::grpc::Status(::grpc::Status::OK);
 }
 
