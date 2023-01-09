@@ -77,6 +77,7 @@
     } else {
         cout << "manager: put: ERROR received" << endl;
         logError("Put", status);
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, status.error_message());
     }
     return ::grpc::Status(::grpc::Status::OK);
 }
@@ -112,6 +113,7 @@
     } else {
         cout << "manager: append: ERROR received" << endl;
         logError("Append", status);
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, status.error_message());
     }
     return ::grpc::Status(::grpc::Status::OK);
 }
@@ -145,6 +147,7 @@
     } else {
         cout << "manager: delete: ERROR received" << endl;
         logError("Delete", status);
+        return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, status.error_message());
     }
     return ::grpc::Status(::grpc::Status::OK);
 }
