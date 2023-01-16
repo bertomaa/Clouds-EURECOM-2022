@@ -114,7 +114,6 @@ int main() {
         throw test_exception("!test_get(skv_1, \"post_200\", nullopt) ||\n"
                              "        !test_get(skv_1, \"post_202\", nullopt)");
     }
-
     // all data on skv_2
     if (!test_get(skv_2, "post_200", "hello") ||
         !test_get(skv_2, "post_202", "wow!") ||
@@ -129,6 +128,7 @@ int main() {
 
     std::this_thread::sleep_for(timespan);
 
+      cout << "HERE2" << endl << endl << endl << endl << endl;
     // you should still be able to get the keys
     if (!test_get(skv_2, "post_200", "hello") ||
       !test_get(skv_2, "post_202", "wow!") ||
@@ -146,6 +146,7 @@ int main() {
     // wait for the transfer
     std::this_thread::sleep_for(timespan);
 
+      cout << "HERE3" << endl << endl << endl << endl << endl;
     if (!test_get(skv_2, "post_200", "hello") ||
         !test_get(skv_2, "post_202", "wow!") ||
         !test_get(skv_1, "post_600", "hi")) {

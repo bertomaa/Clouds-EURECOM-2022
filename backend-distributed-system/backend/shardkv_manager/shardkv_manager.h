@@ -12,6 +12,9 @@
 #include "../build/shardkv.grpc.pb.h"
 #include "../build/shardmaster.grpc.pb.h"
 
+#include <chrono>
+#include <ctime>
+
 using namespace std;
 using grpc::Channel;
 using grpc::Status;
@@ -71,6 +74,9 @@ class ShardkvManager : public Shardkv::Service {
     std::string sm_address;
 
     // TODO add any fields you want here!
-    string shardkv_address;
+    string shardkv_primary_address = "";
+    string shardkv_backup_address = "";
+    time_t last_timestamp_primary = 0;
+
 };
 #endif  // SHARDING_SHARDKV_MANAGER_H

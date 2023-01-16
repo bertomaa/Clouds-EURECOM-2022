@@ -1,6 +1,7 @@
 #include <grpcpp/grpcpp.h>
 
 #include "shardkv_manager.h"
+#include <chrono>
 
 /**
  * This method is analogous to a hashmap lookup. A key is supplied in the
@@ -29,7 +30,7 @@
     req.set_key(request->key());
     GetResponse res;
 
-    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(shardkv_primary_address, grpc::InsecureChannelCredentials());
     auto kvStub = Shardkv::NewStub(channel);
     auto status = kvStub->Get(&cc, req, &res);
     if(status.ok()) {
@@ -69,7 +70,7 @@
     req.set_user(request->user());
     Empty res;
 
-    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(shardkv_primary_address, grpc::InsecureChannelCredentials());
     auto kvStub = Shardkv::NewStub(channel);
     auto status = kvStub->Put(&cc, req, &res);
     if(status.ok()) {
@@ -105,7 +106,7 @@
     req.set_data(request->data());
     Empty res;
 
-    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(shardkv_primary_address, grpc::InsecureChannelCredentials());
     auto kvStub = Shardkv::NewStub(channel);
     auto status = kvStub->Append(&cc, req, &res);
     if(status.ok()) {
@@ -139,7 +140,7 @@
     req.set_key(request->key());
     Empty res;
 
-    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(shardkv_primary_address, grpc::InsecureChannelCredentials());
     auto kvStub = Shardkv::NewStub(channel);
     auto status = kvStub->Delete(&cc, req, &res);
     if(status.ok()) {
@@ -165,9 +166,42 @@
  */
 ::grpc::Status ShardkvManager::Ping(::grpc::ServerContext* context, const PingRequest* request,
                                        ::PingResponse* response){
+
+    if(last_timestamp_primary != 0 && shardkv_primary_address.compare(request->server()) != 0){
+        //cout << "checking if primary is alive " << endl;
+        //check last primary ping is recent enough
+        time_t current_time;
+        time(&current_time);
+        //cout << " last ping: " << last_timestamp_primary << " current: " << current_time << " diff time is: " << difftime(current_time, last_timestamp_primary) << endl;
+        if(difftime(current_time, last_timestamp_primary) > 2){
+            cout << "primary is dead" << endl;
+            shardkv_primary_address = shardkv_backup_address;
+            shardkv_backup_address = "";
+        }
+    }
+
+
     //a shardkv was already registered
-        shardkv_address = request->server();
-        response->set_shardmaster(sm_address);
-        return ::grpc::Status(::grpc::StatusCode::OK, "Success");
+    if(shardkv_primary_address.compare("") == 0){
+        //there is no primary
+        shardkv_primary_address = request->server();
+    }else if(shardkv_primary_address.compare(request->server())){
+        //primary is pinging
+        time(&last_timestamp_primary);
+        response->set_backup(shardkv_backup_address);
+    } else if(shardkv_backup_address.compare("") == 0){
+        //there is no back up
+        shardkv_backup_address = request->server();
+    }else if(shardkv_backup_address.compare("") != 0){
+        if(shardkv_backup_address.compare(request->server()) == 0){
+            //backup is pinging
+            response->set_primary(shardkv_primary_address);
+        }else{
+            //idle server is pinging
+            //TODO: something
+        }
+    }
+    response->set_shardmaster(sm_address);
+    return ::grpc::Status(::grpc::StatusCode::OK, "Success");
 }
 

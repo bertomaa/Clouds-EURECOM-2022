@@ -82,8 +82,6 @@ class ShardkvServer : public Shardkv::Service {
   // ping the shardmanager to get updates about the sharmaster (part 2) and the views changes (part 3)
   void PingShardmanager(Shardkv::Stub* stub);
 
-  bool isKeyAssigned(string key);
-
  private:
   // address we're running on (hostname:port)
   const std::string address;
@@ -102,6 +100,9 @@ class ShardkvServer : public Shardkv::Service {
   mutex mutex_other_managers;
   mutex mutex_users;
   mutex mutex_posts;
+  string shardkv_backup_address;
+  string shardkv_primary_address;
+  bool backup_exists = false;
 };
 
 #endif  // SHARDING_SHARDKV_H

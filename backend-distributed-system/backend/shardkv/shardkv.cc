@@ -40,6 +40,55 @@ string findServerFromKey(string key, vector<server_t>& other_managers, mutex& mu
     mutex_other_managers.unlock();
     cout << "NO SERVER FOUND" << endl;
 }
+
+bool transfer_users_to_backup(string backup_address, map<string, string>& users){
+    cout  << "transfering all users to back up" << endl;
+    for (map<string, string>::iterator it = users.begin(); it != users.end(); ++it) {
+        ClientContext cc;
+        PutRequest req;
+        req.set_key(it->first);
+        req.set_data(it->second);
+        google::protobuf::Empty res;
+
+        auto channel = grpc::CreateChannel(backup_address, grpc::InsecureChannelCredentials());
+        auto kvStub = Shardkv::NewStub(channel);
+        auto status = kvStub->Put(&cc, req, &res);
+        if (status.ok()) {
+            cout << "transfer_users_to_backup, ok for " << it->first << endl;
+        } else {
+            cout << "transfer_users_to_backup, NOT OK for " << it->first << endl;
+            logError("Put", status);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool transfer_posts_to_backup(string backup_address, map<string, post_t>& posts){
+    cout << "transfering all users to back up" << endl;
+    for (map<string, post_t>::iterator it = posts.begin(); it != posts.end(); ++it) {
+        ClientContext cc;
+        PutRequest req;
+        req.set_key(it->first);
+        req.set_data(it->second.content);
+        req.set_user(it->second.user_id);
+        google::protobuf::Empty res;
+
+        auto channel = grpc::CreateChannel(backup_address, grpc::InsecureChannelCredentials());
+        auto kvStub = Shardkv::NewStub(channel);
+        auto status = kvStub->Put(&cc, req, &res);
+        if (status.ok()) {
+            cout << "transfer_posts_to_backup, ok for " << it->first << endl;
+        } else {
+            cout << "transfer_posts_to_backup, NOT OK for " << it->first << endl;
+            logError("Put", status);
+            return false;
+        }
+    }
+    return true;
+}
+
+
 /**
  * This method is analogous to a hashmap lookup. A key is supplied in the
  * request and if its value can be found, we should either set the appropriate
@@ -67,7 +116,7 @@ string findServerFromKey(string key, vector<server_t>& other_managers, mutex& mu
     cout << "in shardkv, get, key: " << request->key() << endl;
     bool is_all_users = key.compare("all_users") == 0;
     if(!NO_REQ && (!is_all_users && !::isKeyAssigned(key, shards_assigned, mutex_shards_assigned))) {
-        cerr << "shrdkv not responsible of this key" << endl;
+        cout << "shrdkv not responsible of this key" << endl;
         return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "key is not assigned to this shardkv");
     }
 
@@ -201,11 +250,21 @@ string findServerFromKey(string key, vector<server_t>& other_managers, mutex& mu
         p.user_id = request->user();
         mutex_posts.lock();
         posts[key] = p;
+        if(backup_exists && transfer_posts_to_backup(shardkv_backup_address, posts) == false){
+            posts.erase(key);
+            mutex_posts.unlock();
+            return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "could not add post to back up");
+        }
         mutex_posts.unlock();
     } else {
         //put on a user
         mutex_users.lock();
         users[request->key()] = request->data();
+        if(backup_exists && transfer_users_to_backup(shardkv_backup_address, users) == false){
+            users.erase(request->key());
+            mutex_users.unlock();
+            return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "could not add user to back up");
+        }
         mutex_users.unlock();
     }
     cout << "printing users" << endl;
@@ -438,6 +497,7 @@ void ShardkvServer::QueryShardmaster(Shardmaster::Stub* stub) {
  * method!
  * */
 void ShardkvServer::PingShardmanager(Shardkv::Stub* stub) {
+    //cout << " i am " << address << " pinging, still alive" << endl;
 
     PingRequest pingReq;
     pingReq.set_server(address);
@@ -448,10 +508,34 @@ void ShardkvServer::PingShardmanager(Shardkv::Stub* stub) {
     Status status = stub->Ping(&cc, pingReq, &pingResponse);
     if(status.ok()) {
         shardmaster_address = pingResponse.shardmaster();
+        if(pingResponse.primary().compare(address)){
+            //this shardkv is primary
+            if(pingResponse.backup().compare("") != 0) {
+                shardkv_backup_address = pingResponse.backup();
+                if(!backup_exists){
+                    mutex_users.lock();
+                    transfer_users_to_backup(shardkv_backup_address, users);
+                    mutex_users.unlock();
+                    mutex_posts.lock();
+                    transfer_posts_to_backup(shardkv_backup_address, posts);
+                    mutex_posts.unlock();
+                    backup_exists = true;
+                }
+                //cout << address << " is primary, back up is: " << shardkv_backup_address << endl;
+            }
+            //cout << address << " is primary, back up does not exist" << endl;
+        }else if(pingResponse.backup().compare(address)){
+            backup_exists = false;
+            //this server is backup
+            shardkv_primary_address = pingResponse.primary();
+            //cout << address << " is backup, primary is: " << shardkv_primary_address << endl;
+        }
     } else {
         logError("Ping request", status);
     }
 }
+
+
 
 
 
