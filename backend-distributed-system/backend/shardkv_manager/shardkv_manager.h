@@ -77,6 +77,6 @@ class ShardkvManager : public Shardkv::Service {
     string shardkv_primary_address = "";
     string shardkv_backup_address = "";
     time_t last_timestamp_primary = 0;
-
+    mutex addresses;
 };
 #endif  // SHARDING_SHARDKV_MANAGER_H

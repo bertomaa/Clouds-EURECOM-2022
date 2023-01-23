@@ -144,7 +144,6 @@ bool transfer_posts_to_backup(string backup_address, map<string, post_t>& posts)
                 return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "post does not exist");
             }
             response->set_data(posts[key].content);
-            cout << "d" <<endl;
             mutex_posts.unlock();
         } else {
             //get on a user
