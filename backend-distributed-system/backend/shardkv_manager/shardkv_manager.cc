@@ -1,6 +1,7 @@
 #include <grpcpp/grpcpp.h>
 
 #include "shardkv_manager.h"
+#include <chrono>
 
 /**
  * This method is analogous to a hashmap lookup. A key is supplied in the
@@ -29,7 +30,7 @@
     req.set_key(request->key());
     GetResponse res;
 
-    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(shardkv_primary_address, grpc::InsecureChannelCredentials());
     auto kvStub = Shardkv::NewStub(channel);
     auto status = kvStub->Get(&cc, req, &res);
     if(status.ok()) {
@@ -69,7 +70,7 @@
     req.set_user(request->user());
     Empty res;
 
-    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(shardkv_primary_address, grpc::InsecureChannelCredentials());
     auto kvStub = Shardkv::NewStub(channel);
     auto status = kvStub->Put(&cc, req, &res);
     if(status.ok()) {
@@ -105,7 +106,7 @@
     req.set_data(request->data());
     Empty res;
 
-    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(shardkv_primary_address, grpc::InsecureChannelCredentials());
     auto kvStub = Shardkv::NewStub(channel);
     auto status = kvStub->Append(&cc, req, &res);
     if(status.ok()) {
@@ -139,7 +140,7 @@
     req.set_key(request->key());
     Empty res;
 
-    auto channel = grpc::CreateChannel(shardkv_address, grpc::InsecureChannelCredentials());
+    auto channel = grpc::CreateChannel(shardkv_primary_address, grpc::InsecureChannelCredentials());
     auto kvStub = Shardkv::NewStub(channel);
     auto status = kvStub->Delete(&cc, req, &res);
     if(status.ok()) {
@@ -165,9 +166,74 @@
  */
 ::grpc::Status ShardkvManager::Ping(::grpc::ServerContext* context, const PingRequest* request,
                                        ::PingResponse* response){
+    addresses.lock();
+
+    if(last_timestamp_primary != 0 && shardkv_primary_address.compare(request->server()) != 0){
+        //check last primary ping is recent enough
+        time_t current_time;
+        time(&current_time);
+        //cout << "checking primary is alive" << endl;
+        //cout << " last ping: " << last_timestamp_primary << " current: " << current_time << " diff time is: " << difftime(current_time, last_timestamp_primary) << endl;
+        if(difftime(current_time, last_timestamp_primary) > 2.0){
+            cout << endl << endl << endl << endl << endl << "primary is dead" << endl << endl << endl << endl;
+            shardkv_primary_address = shardkv_backup_address;
+            shardkv_backup_address = "";
+        }
+    }
+    if(address.find("12000") != std::string::npos) {
+        cout << "i am " << address << endl;
+        cout << shardkv_backup_address << " is backup" << endl;
+        cout << shardkv_primary_address << " is primary" << endl;
+    }
+
+    bool backup = false;
+    if(request->server().find("12002") != std::string::npos) {
+        cout << "is pinging  " << request->server() << endl;
+        backup = true;
+    }
     //a shardkv was already registered
-        shardkv_address = request->server();
-        response->set_shardmaster(sm_address);
-        return ::grpc::Status(::grpc::StatusCode::OK, "Success");
+    if(shardkv_primary_address.compare("") == 0){
+        //there is no primary
+        shardkv_primary_address = request->server();
+        if(backup){
+            cout << "a" << endl;
+        }
+    }else if(shardkv_primary_address.compare(request->server()) == 0){
+        //primary is pinging
+        //cout << "server " << request->server() << "is pingng" << endl;
+        time(&last_timestamp_primary);
+        response->set_backup(shardkv_backup_address);
+
+        if(backup){
+            cout << "b" << endl;
+        }
+    } else if(shardkv_backup_address.compare("") == 0){
+        //there is no back up
+
+        if(backup){
+            cout << "c" << endl;
+        }
+        shardkv_backup_address = request->server();
+    }else if(shardkv_backup_address.compare(shardkv_backup_address) != 0){
+        if(shardkv_backup_address.compare(request->server()) == 0){
+
+            if(backup){
+                cout << "d" << endl;
+            }
+            //backup is pinging
+            response->set_primary(shardkv_primary_address);
+        }else{
+            //idle server is pinging
+
+            if(backup){
+                cout << "e" << endl;
+            }
+            //TODO: something
+        }
+    }
+    response->set_shardmaster(sm_address);
+
+    addresses.unlock();
+    return ::grpc::Status(::grpc::StatusCode::OK, "Success");
 }
 
